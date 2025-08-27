@@ -1,0 +1,145 @@
+
+# -------------------
+# Outputs (must come before lights)
+# -------------------
+output:
+  - platform: gpio
+    pin: GPIO15
+    id: onboard_led
+
+# -------------------
+# Lights
+# -------------------
+light:
+  - platform: esp32_rmt_led_strip
+    rgb_order: GRB
+    chipset: WS2812
+    pin: GPIO18
+    num_leds: 3
+    name: "Status Light"
+    id: status_light
+    restore_mode: ALWAYS_OFF
+
+  - platform: binary
+    name: "Onboard LED"
+    output: onboard_led
+    id: Onboard_status_light
+    restore_mode: ALWAYS_OFF
+
+# -------------------
+# I2C OLED
+# -------------------
+i2c:
+  sda: 8
+  scl: 9
+  scan: true
+  id: bus_a
+  
+display:
+  - platform: ssd1306_i2c
+    model: "SSD1306 128x64"
+    id: oled
+    address: 0x3C
+    lambda: |-
+      if (id(show_message)) {
+        it.printf(64, 32, id(font1), TextAlign::CENTER, "%s", id(message_text).c_str());
+      } else {
+        // Default Home Screen
+        it.printf(64, 48, id(font1), TextAlign::CENTER, "10.254.296.92");
+        it.strftime(64, 16, id(font_big), TextAlign::CENTER, "%H:%M", id(home_time).now());
+      }
+
+time:
+  - platform: homeassistant
+    id: home_time
+
+font:
+  - file: "ARIAL.TTF"
+    id: font1
+    size: 16
+  - file: "fonts/digital-7i.ttf"
+    id: font_big
+    size: 48
+
+
+# -------------------
+# Rotary Encoder
+# -------------------
+sensor:
+  - platform: rotary_encoder
+    name: "Rotary Encoder"
+    pin_a: GPIO2
+    pin_b: GPIO3
+    id: rotary_value
+    resolution: 2
+
+# Store custom message
+text_sensor:
+  - platform: homeassistant
+    id: ha_message
+    entity_id: input_text.oled_message
+    on_value:
+      then:
+        - lambda: |-
+            id(message_text) = x;
+            id(show_message) = true;
+        - component.update: oled
+        - delay: 5s
+        - lambda: |-
+            id(show_message) = false;
+        - component.update: oled
+
+globals:
+  - id: message_text
+    type: std::string
+    restore_value: no
+    initial_value: '"Hello"'
+  - id: show_message
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+
+# -------------------
+# Push Buttons
+# -------------------
+binary_sensor:
+  - platform: gpio
+    pin:
+      number: GPIO4
+      inverted: true
+      mode: INPUT_PULLUP
+    name: "Restart Button"
+    on_press:
+      - button.press: restart_device
+
+  - platform: gpio
+    pin:
+      number: GPIO5
+      inverted: true
+      mode: INPUT_PULLUP
+    name: "Power Button"
+    on_press:
+      - switch.toggle: power_switch
+
+  - platform: gpio
+    pin:
+      number: GPIO7
+      inverted: true
+      mode: INPUT_PULLUP
+    name: "S2 Switch"
+    on_press:
+      - logger.log: "S2 Switch Pressed"
+
+# -------------------
+# Restart & Power Control
+# -------------------
+button:
+  - platform: restart
+    id: restart_device
+    name: "Restart ESP"
+
+switch:
+  - platform: gpio
+    pin: GPIO6
+    id: power_switch
+    name: "Power Control"
