@@ -10,7 +10,6 @@ esp32:
 # Enable logging
 logger:
 
-
 wifi:
   ssid: !secret wifi_ssid
   password: !secret wifi_password
@@ -29,7 +28,10 @@ output:
   - platform: gpio
     pin: GPIO15
     id: onboard_led
-
+    
+remote_receiver:
+  pin: GPIO14
+  dump: all
 # -------------------
 # Lights
 # -------------------
@@ -67,15 +69,21 @@ display:
       if (id(show_message)) {
         // Temporary message from HA
         it.printf(64, 16, id(font1), TextAlign::CENTER, "%s", id(message_text).c_str());
-      } else {
+      } 
+      
+      else {
         // Page menu system
         if (id(current_page) == 0) {
           // Page 1: Show Time
           it.strftime(64, 19, id(font_big), TextAlign::CENTER, "%I:%M", id(home_time).now());
-        } else if (id(current_page) == 1) {
+        } 
+
+        else if (id(current_page) == 1) {
           // Page 2: Show IP
           it.printf(64, 32, id(font1), TextAlign::CENTER, "%s", id(my_ip).state.c_str());
-        } else if (id(current_page) == 2) {
+        } 
+
+        else if (id(current_page) == 2) {
         // Page 3: 4 boxes showing HA entity states
         it.rectangle(0, 0, 64, 24);   // Box 1
         it.rectangle(64, 0, 64, 24);  // Box 2
@@ -96,15 +104,15 @@ time:
 
 font:
   - file: "ARIAL.TTF"
-    id: font1
-    size: 16
-  - file: "fonts/digital-7i.ttf"
-    id: font_big
-    size: 72
-
-  - file: "ARIAL.TTF"
     id: font_14
     size: 14
+  - file: "ARIAL.TTF"
+    id: font1
+    size: 16
+  - file: "fonts/digital-7mi.ttf"
+    id: font_big
+    size: 60
+
 
 # -------------------
 # Rotary Encoder
@@ -129,6 +137,7 @@ sensor:
             if (id(current_page) < 0) id(current_page) = 2;
             id(oled).update();
 
+
 # -------------------
 # WiFi Info (for IP display)
 # -------------------
@@ -151,7 +160,8 @@ text_sensor:
     id: relay_state
     entity_id: light.esphome_bedroom_bedroom_night_light
 
-  # Custom HA message
+
+ #Custom HA message
   - platform: homeassistant
     id: ha_message
     entity_id: input_text.oled_message
@@ -166,6 +176,7 @@ text_sensor:
             id(show_message) = false;
         - component.update: oled
 
+
 # -------------------
 # Globals
 # -------------------
@@ -174,7 +185,7 @@ globals:
   - id: message_text
     type: std::string
     restore_value: no
-    initial_value: '"Hello"'
+    initial_value: '"Hello Sid"'
 
   - id: show_message
     type: bool
@@ -185,18 +196,50 @@ globals:
     type: int
     restore_value: no
     initial_value: '0'
+globals:
+  - id: display_on
+    type: bool
+    restore_value: no
+    initial_value: "true"
+
+# -------------------
+# Scripts
+# -------------------
+script:
+  - id: show_temp_message
+    parameters:
+      msg: string
+    then:
+      - lambda: |-
+          id(message_text) = msg;
+          id(show_message) = true;
+          id(display_on) = true;   // wake display
+      - component.update: oled
+      - script.execute: auto_off_display
+      - delay: 5s
+      - lambda: |-
+          id(show_message) = false;
+      - component.update: oled
+
+  - id: auto_off_display
+    mode: restart
+    then:
+      - delay: 10s
+      - lambda: |-
+          id(display_on) = false;
+      - component.update: oled
 
 
 # -------------------
 # Push Buttons
 # -------------------
 binary_sensor:
-  - platform: gpio
-    pin:  
-      number: GPIO4
-      inverted: true
-      mode: INPUT_PULLUP
-    name: "IR Button"
+  # - platform: gpio
+  #   pin:  
+  #     number: GPIO4
+  #     inverted: true
+  #     mode: INPUT_PULLUP
+  #   name: "IR Button"
 
   - platform: gpio
     pin:
@@ -204,13 +247,53 @@ binary_sensor:
       inverted: true
       mode: INPUT_PULLUP
     name: "Power Button"
+    on_double_click: 
+      then:
+
+        - lambda: |-
+            id(message_text) = "Switching to TV Mode";
+            id(show_message) = true;
+        - component.update: oled
+        - delay: 5s
+        - lambda: |-
+            id(show_message) = false;    
+
+        - logger.log: "TV Mode"
+        - switch.turn_on: relay_monitor
+        - switch.turn_on: server_power_switch
+        - delay: 1s
+        - switch.turn_off: server_power_switch
+        - delay: 3s
+        # - switch.turn_off: relay_server (optional)
+        - switch.turn_on: relay_alexa
+        - switch.turn_on: relay_firetv
+
+    on_press:
+      then:
+        - lambda: |-
+            id(message_text) = "Work Mode";
+            id(show_message) = true;
+        - component.update: oled
+        - delay: 5s
+        - lambda: |-
+            id(show_message) = false;
+
+        - logger.log: "Work Mode"
+        - switch.turn_off: relay_alexa
+        - switch.turn_on: relay_monitor
+        - switch.turn_on: relay_server
+        - delay: 1s
+        - switch.turn_on: server_power_switch
+        - delay: 1s
+        - switch.turn_off: server_power_switch
 
   - platform: gpio
     pin:
       number: GPIO5
       inverted: true
       mode: INPUT_PULLUP
-    name: "S2 Switch"
+    name: "RE OK"
+    
 
 # -------------------
 # Restart & Power Control
@@ -223,8 +306,8 @@ button:
 switch:
   - platform: gpio
     pin: GPIO6
-    id: power_switch
-    name: "Power Control"
+    id: server_power_switch
+    name: "Server Power Switch"
 
   - platform: gpio
     pin: GPIO10
