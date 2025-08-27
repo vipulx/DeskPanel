@@ -1,6 +1,6 @@
-
+   
 # -------------------
-# Outputs (must come before lights)
+# Outputs
 # -------------------
 output:
   - platform: gpio
@@ -42,13 +42,25 @@ display:
     address: 0x3C
     lambda: |-
       if (id(show_message)) {
-        it.printf(64, 32, id(font1), TextAlign::CENTER, "%s", id(message_text).c_str());
+        // Temporary message from HA
+        it.printf(64, 16, id(font1), TextAlign::CENTER, "%s", id(message_text).c_str());
       } else {
-        // Default Home Screen
-        it.printf(64, 48, id(font1), TextAlign::CENTER, "10.254.296.92");
-        it.strftime(64, 16, id(font_big), TextAlign::CENTER, "%H:%M", id(home_time).now());
+        // Page menu system
+        if (id(current_page) == 0) {
+          // Page 1: Show Time
+          it.strftime(64, 19, id(font_big), TextAlign::CENTER, "%H:%M", id(home_time).now());
+        } else if (id(current_page) == 1) {
+          // Page 2: Show IP
+          it.printf(64, 32, id(font1), TextAlign::CENTER, "%s", id(my_ip).state.c_str());
+        } else if (id(current_page) == 2) {
+          // Page 3: Example page
+          it.printf(64, 32, id(font1), TextAlign::CENTER, "Page 3 Example");
+        }
       }
 
+# -------------------
+# Time & Fonts
+# -------------------
 time:
   - platform: homeassistant
     id: home_time
@@ -59,8 +71,7 @@ font:
     size: 16
   - file: "fonts/digital-7i.ttf"
     id: font_big
-    size: 48
-
+    size: 72
 
 # -------------------
 # Rotary Encoder
@@ -72,9 +83,29 @@ sensor:
     pin_b: GPIO3
     id: rotary_value
     resolution: 2
+    on_clockwise:
+      then:
+        - lambda: |-
+            id(current_page)++;
+            if (id(current_page) > 2) id(current_page) = 0;
+            id(oled).update();
+    on_anticlockwise:
+      then:
+        - lambda: |-
+            id(current_page)--;
+            if (id(current_page) < 0) id(current_page) = 2;
+            id(oled).update();
 
-# Store custom message
+# -------------------
+# WiFi Info (for IP display)
+# -------------------
 text_sensor:
+  - platform: wifi_info
+    ip_address:
+      name: "ESP IP Address"
+      id: my_ip
+
+  # Custom HA message
   - platform: homeassistant
     id: ha_message
     entity_id: input_text.oled_message
@@ -89,6 +120,9 @@ text_sensor:
             id(show_message) = false;
         - component.update: oled
 
+# -------------------
+# Globals
+# -------------------
 globals:
   - id: message_text
     type: std::string
@@ -98,6 +132,10 @@ globals:
     type: bool
     restore_value: no
     initial_value: 'false'
+  - id: current_page
+    type: int
+    restore_value: no
+    initial_value: '0'
 
 # -------------------
 # Push Buttons
