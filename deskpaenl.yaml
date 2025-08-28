@@ -20,6 +20,7 @@ wifi:
     password: "HRdpdqnZy3FN"
 
 captive_portal:
+
     
 # -------------------
 # Outputs
@@ -32,6 +33,7 @@ output:
 remote_receiver:
   pin: GPIO14
   dump: all
+
 # -------------------
 # Lights
 # -------------------
@@ -39,7 +41,7 @@ light:
   - platform: esp32_rmt_led_strip
     rgb_order: GRB
     chipset: WS2812
-    pin: GPIO18
+    pin: GPIO04
     num_leds: 3
     name: "Status Light"
     id: status_light
@@ -66,35 +68,35 @@ display:
     id: oled
     address: 0x3C
     lambda: |-
-      if (id(show_message)) {
-        // Temporary message from HA
-        it.printf(64, 16, id(font1), TextAlign::CENTER, "%s", id(message_text).c_str());
-      } 
-      
-      else {
-        // Page menu system
-        if (id(current_page) == 0) {
-          // Page 1: Show Time
-          it.strftime(64, 19, id(font_big), TextAlign::CENTER, "%I:%M", id(home_time).now());
-        } 
+      if (!id(display_on)) {
+        it.fill(COLOR_OFF);  // blank screen when off
+        return;
+      }
 
+      if (id(show_message)) {
+        it.printf(64, 16, id(font1), TextAlign::CENTER, "%s", id(message_text).c_str());
+      } else {
+        if (id(current_page) == 0) {
+          int hour = id(home_time).now().hour;
+          int minute = id(home_time).now().minute;
+          hour = (hour % 12 == 0) ? 12 : hour % 12;
+          it.printf(64, 19, id(font_big), TextAlign::CENTER, "%d:%02d", hour, minute);
+        } 
         else if (id(current_page) == 1) {
-          // Page 2: Show IP
           it.printf(64, 32, id(font1), TextAlign::CENTER, "%s", id(my_ip).state.c_str());
         } 
-
         else if (id(current_page) == 2) {
-        // Page 3: 4 boxes showing HA entity states
-        it.rectangle(0, 0, 64, 24);   // Box 1
-        it.rectangle(64, 0, 64, 24);  // Box 2
-        it.rectangle(0, 24, 64, 24);  // Box 3
-        it.rectangle(64, 24, 64, 24); // Box 4
+          it.rectangle(0, 0, 64, 24);
+          it.rectangle(64, 0, 64, 24);
+          it.rectangle(0, 24, 64, 24);
+          it.rectangle(64, 24, 64, 24);
+          it.printf(32, 12, id(font_14), TextAlign::CENTER, "Light: %s", id(light_state).state.c_str());
+          it.printf(96, 12, id(font_14), TextAlign::CENTER, "Fan: %s", id(fan_state).state.c_str());
+          it.printf(32, 36, id(font_14), TextAlign::CENTER, "Plug: %s", id(plug_state).state.c_str());
+          it.printf(96, 36, id(font_14), TextAlign::CENTER, "Relay: %s", id(relay_state).state.c_str());
+        }
+      }
 
-        it.printf(32, 12, id(font_14), TextAlign::CENTER, "Light: %s", id(light_state).state.c_str());
-        it.printf(96, 12, id(font_14), TextAlign::CENTER, "Fan: %s", id(fan_state).state.c_str());
-        it.printf(32, 36, id(font_14), TextAlign::CENTER, "Plug: %s", id(plug_state).state.c_str());
-        it.printf(96, 36, id(font_14), TextAlign::CENTER, "Relay: %s", id(relay_state).state.c_str());
-      }} 
 # -------------------
 # Time & Fonts
 # -------------------
@@ -109,10 +111,9 @@ font:
   - file: "ARIAL.TTF"
     id: font1
     size: 16
-  - file: "fonts/digital-7mi.ttf"
+  - file: "fonts/digital-7m.ttf"
     id: font_big
-    size: 60
-
+    size: 72
 
 # -------------------
 # Rotary Encoder
@@ -126,17 +127,18 @@ sensor:
     resolution: 2
     on_clockwise:
       then:
+        - script.execute: reset_display_timer
         - lambda: |-
             id(current_page)++;
             if (id(current_page) > 2) id(current_page) = 0;
             id(oled).update();
     on_anticlockwise:
       then:
+        - script.execute: reset_display_timer
         - lambda: |-
             id(current_page)--;
             if (id(current_page) < 0) id(current_page) = 2;
             id(oled).update();
-
 
 # -------------------
 # WiFi Info (for IP display)
@@ -160,13 +162,13 @@ text_sensor:
     id: relay_state
     entity_id: light.esphome_bedroom_bedroom_night_light
 
-
  #Custom HA message
   - platform: homeassistant
     id: ha_message
     entity_id: input_text.oled_message
     on_value:
       then:
+        - script.execute: reset_display_timer
         - lambda: |-
             id(message_text) = x;
             id(show_message) = true;
@@ -176,12 +178,10 @@ text_sensor:
             id(show_message) = false;
         - component.update: oled
 
-
 # -------------------
 # Globals
 # -------------------
 globals:
-
   - id: message_text
     type: std::string
     restore_value: no
@@ -196,51 +196,50 @@ globals:
     type: int
     restore_value: no
     initial_value: '0'
-globals:
+
   - id: display_on
     type: bool
     restore_value: no
     initial_value: "true"
 
+  - id: display_timeout
+    type: int
+    restore_value: no
+    initial_value: '30'   # timeout in seconds
+
 # -------------------
 # Scripts
 # -------------------
 script:
+  - id: reset_display_timer
+    mode: restart
+    then:
+      - lambda: |-
+          id(display_on) = true;
+      - component.update: oled
+      - delay: !lambda "return id(display_timeout) * 1000;"
+      - lambda: |-
+          id(display_on) = false;
+      - component.update: oled
+
   - id: show_temp_message
     parameters:
       msg: string
     then:
+      - script.execute: reset_display_timer
       - lambda: |-
           id(message_text) = msg;
           id(show_message) = true;
-          id(display_on) = true;   // wake display
       - component.update: oled
-      - script.execute: auto_off_display
       - delay: 5s
       - lambda: |-
           id(show_message) = false;
       - component.update: oled
 
-  - id: auto_off_display
-    mode: restart
-    then:
-      - delay: 10s
-      - lambda: |-
-          id(display_on) = false;
-      - component.update: oled
-
-
 # -------------------
 # Push Buttons
 # -------------------
 binary_sensor:
-  # - platform: gpio
-  #   pin:  
-  #     number: GPIO4
-  #     inverted: true
-  #     mode: INPUT_PULLUP
-  #   name: "IR Button"
-
   - platform: gpio
     pin:
       number: GPIO7
@@ -249,7 +248,7 @@ binary_sensor:
     name: "Power Button"
     on_double_click: 
       then:
-
+        - script.execute: reset_display_timer
         - lambda: |-
             id(message_text) = "Switching to TV Mode";
             id(show_message) = true;
@@ -257,19 +256,18 @@ binary_sensor:
         - delay: 5s
         - lambda: |-
             id(show_message) = false;    
-
         - logger.log: "TV Mode"
         - switch.turn_on: relay_monitor
         - switch.turn_on: server_power_switch
         - delay: 1s
         - switch.turn_off: server_power_switch
         - delay: 3s
-        # - switch.turn_off: relay_server (optional)
         - switch.turn_on: relay_alexa
         - switch.turn_on: relay_firetv
 
     on_press:
       then:
+        - script.execute: reset_display_timer
         - lambda: |-
             id(message_text) = "Work Mode";
             id(show_message) = true;
@@ -277,7 +275,6 @@ binary_sensor:
         - delay: 5s
         - lambda: |-
             id(show_message) = false;
-
         - logger.log: "Work Mode"
         - switch.turn_off: relay_alexa
         - switch.turn_on: relay_monitor
@@ -293,7 +290,9 @@ binary_sensor:
       inverted: true
       mode: INPUT_PULLUP
     name: "RE OK"
-    
+    on_press:
+      then:
+        - script.execute: reset_display_timer
 
 # -------------------
 # Restart & Power Control
