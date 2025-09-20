@@ -5,10 +5,19 @@ esphome:
 esp32:
   board: lolin_s2_mini
   framework:
-    type: esp-idf
+    type: arduino
 
 # Enable logging
 logger:
+
+# Enable Home Assistant API
+api:
+  encryption:
+    key: "u8QItyIkTUl7Cgnewhi8cTiVLk83ylWnHNJMtunfh7U="
+
+ota:
+  - platform: esphome
+    password: "17a8526c55463f83fbdde041f796cd60"
 
 wifi:
   ssid: !secret wifi_ssid
@@ -17,10 +26,10 @@ wifi:
   # Enable fallback hotspot (captive portal) in case wifi connection fails
   ap:
     ssid: "Deskpanel Fallback Hotspot"
-    password: !secret wifi_password
+    password: "HRdpdqnZy3FN"
 
 captive_portal:
-
+    
     
 # -------------------
 # Outputs
@@ -73,30 +82,73 @@ display:
         return;
       }
 
+      // -------------------
+      // Custom message screen
+      // -------------------
       if (id(show_message)) {
-        it.printf(64, 16, id(font1), TextAlign::CENTER, "%s", id(message_text).c_str());
+        auto wrap_text = [&](std::string text, int max_chars, int start_y, int line_height) {
+          std::string line;
+          int y = start_y;
+          int count = 0;
+
+          for (char c : text) {
+            if (c == ' ' && count >= max_chars-1) {
+              it.printf(64, y, id(font1), TextAlign::CENTER, "%s", line.c_str());
+              line.clear();
+              count = 0;
+              y += line_height;
+              continue;
+            }
+
+            line.push_back(c);
+            count++;
+
+            if (count >= max_chars) {
+              it.printf(64, y, id(font1), TextAlign::CENTER, "%s", line.c_str());
+              line.clear();
+              count = 0;
+              y += line_height;
+            }
+
+            if (y > 64) break;  // stop if OLED is full
+          }
+
+          if (!line.empty() && y <= 64) {
+            it.printf(64, y, id(font1), TextAlign::CENTER, "%s", line.c_str());
+          }
+        };
+
+        // Call wrapper: max 16 chars per line, starting at Y=10
+        wrap_text(id(message_text), 10, 10, 16);
+
       } else {
+        // -------------------
+        // Page system
+        // -------------------
         if (id(current_page) == 0) {
+          // Page 1: Clock
           int hour = id(home_time).now().hour;
           int minute = id(home_time).now().minute;
           hour = (hour % 12 == 0) ? 12 : hour % 12;
           it.printf(64, 19, id(font_big), TextAlign::CENTER, "%d:%02d", hour, minute);
-        } 
-        else if (id(current_page) == 1) {
-          it.printf(64, 32, id(font1), TextAlign::CENTER, "%s", id(my_ip).state.c_str());
-        } 
-        else if (id(current_page) == 2) {
+
+        } else if (id(current_page) == 1) {
+          // Page 2: Network Info
+          it.printf(64, 5, id(fontd), TextAlign::CENTER, "%s", id(my_ip).state.c_str());
+
+        } else if (id(current_page) == 2) {
+          // Page 3: HA Entity Status
           it.rectangle(0, 0, 64, 24);
           it.rectangle(64, 0, 64, 24);
           it.rectangle(0, 24, 64, 24);
           it.rectangle(64, 24, 64, 24);
+
           it.printf(32, 12, id(font_14), TextAlign::CENTER, "Light: %s", id(light_state).state.c_str());
           it.printf(96, 12, id(font_14), TextAlign::CENTER, "Fan: %s", id(fan_state).state.c_str());
           it.printf(32, 36, id(font_14), TextAlign::CENTER, "Plug: %s", id(plug_state).state.c_str());
           it.printf(96, 36, id(font_14), TextAlign::CENTER, "Relay: %s", id(relay_state).state.c_str());
         }
       }
-
 # -------------------
 # Time & Fonts
 # -------------------
@@ -108,9 +160,12 @@ font:
   - file: "ARIAL.TTF"
     id: font_14
     size: 14
-  - file: "ARIAL.TTF"
+  - file: "fonts/digital-7m.ttf"
     id: font1
-    size: 16
+    size: 24
+  - file: "fonts/digital-7m.ttf"
+    id: fontd
+    size: 24
   - file: "fonts/digital-7m.ttf"
     id: font_big
     size: 72
@@ -119,6 +174,12 @@ font:
 # Rotary Encoder
 # -------------------
 sensor:
+
+  - platform: wifi_signal
+    name: "WiFi Signal"
+    id: my_wifi_signal
+    update_interval: 30s
+
   - platform: rotary_encoder
     name: "Rotary Encoder"
     pin_a: GPIO2
