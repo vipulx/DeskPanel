@@ -1,6 +1,10 @@
 esphome:
   name: deskpanel
   friendly_name: deskpanel
+  on_boot:
+    priority: -100 # Ensures this runs after everything else is set up
+    then:
+      - script.execute: reset_display_timer
 
 esp32:
   board: lolin_s2_mini
@@ -213,12 +217,15 @@ text_sensor:
   - platform: homeassistant
     id: light_state
     entity_id: light.esphome_bedroom_bathroom_light
+
   - platform: homeassistant
     id: fan_state
     entity_id: fan.esphome_bedroom_bedroom_fan
+
   - platform: homeassistant
     id: plug_state
     entity_id: light.esphome_bedroom_bedroom_light
+
   - platform: homeassistant
     id: relay_state
     entity_id: light.esphome_bedroom_bedroom_night_light
@@ -309,14 +316,9 @@ binary_sensor:
     name: "Power Button"
     on_double_click: 
       then:
-        - script.execute: reset_display_timer
-        - lambda: |-
-            id(message_text) = "Switching to TV Mode";
-            id(show_message) = true;
-        - component.update: oled
-        - delay: 5s
-        - lambda: |-
-            id(show_message) = false;    
+        - script.execute:
+            id: show_temp_message
+            msg: "Switching to TV Mode"
         - logger.log: "TV Mode"
         - switch.turn_on: relay_monitor
         - switch.turn_on: server_power_switch
@@ -328,14 +330,9 @@ binary_sensor:
 
     on_press:
       then:
-        - script.execute: reset_display_timer
-        - lambda: |-
-            id(message_text) = "Work Mode";
-            id(show_message) = true;
-        - component.update: oled
-        - delay: 5s
-        - lambda: |-
-            id(show_message) = false;
+        - script.execute:
+            id: show_temp_message
+            msg: "Work Mode"
         - logger.log: "Work Mode"
         - switch.turn_off: relay_alexa
         - switch.turn_on: relay_monitor
@@ -354,7 +351,6 @@ binary_sensor:
     on_press:
       then:
         - script.execute: reset_display_timer
-
 # -------------------
 # Restart & Power Control
 # -------------------
