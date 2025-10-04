@@ -2,9 +2,11 @@
 # ESPHome Desk Panel V2 Configuration
 #
 # Features Added:
+# - (FIXED) Corrected YAML indentation error in on_multi_click.
+# - (NEW) Added a complete "Space Shooter" game on Page 8.
+# - (MODIFIED) Game interface updated to include a border, matching the classic Nokia style.
+# - (MODIFIED) Snake visuals enhanced with a distinct head and tail.
 # - A complete, playable Snake game on Page 7.
-# - (MODIFIED) Focus Timer now has a dedicated "Setup Mode" for selecting time.
-# - (NEW) Added a text_sensor to report the Focus Mode ON/OFF state to Home Assistant.
 # -----------------------------------------------------------------------------
 esphome:
   name: deskpanel
@@ -123,11 +125,9 @@ display:
       } else {
         it.fill(COLOR_OFF);
       }
-
       if (id(page_is_active)) {
         // it.rectangle(0, 0, 128, 64);
       }
-
       // --- CUSTOM MESSAGE OVERLAY ---
       if (id(show_message)) {
         auto wrap_text = [&](std::string text) {
@@ -155,7 +155,6 @@ display:
         wrap_text(id(message_text));
         return;
       }
-
       // --- PAGE SYSTEM ---
       switch(id(current_page)) {
         // --- PAGE 0: Clock ---
@@ -167,7 +166,6 @@ display:
           it.strftime(64, 58, id(font_14), TextAlign::CENTER, "%A, %b %d", id(home_time).now());
           break;
         }
-
         // --- PAGE 1: Network Info ---
         case 1: {
           it.printf(64, 5, id(font_14), TextAlign::CENTER, "IP Address:");
@@ -175,7 +173,6 @@ display:
           it.printf(64, 55, id(font_14), TextAlign::CENTER, "WiFi: %.0f%%", id(my_wifi_signal).state);
           break;
         }
-
         // --- PAGE 2: HA Entity Status ---
         case 2: {
           it.rectangle(1, 1, 62, 30); it.rectangle(65, 1, 62, 30);
@@ -186,7 +183,6 @@ display:
           it.printf(96, 48, id(font_14), TextAlign::CENTER, "Night: %s", id(relay_state).state.c_str());
           break;
         }
-        
         // --- PAGE 3: Interactive Relay Control ---
         case 3: {
           auto draw_toggle = [&](int x, int y, const char* label, bool state, bool selected) {
@@ -216,7 +212,6 @@ display:
           }
           break;
         }
-
         // --- PAGE 4: Focus Timer (UPGRADED) ---
         case 4: {
           if (id(pomodoro_active)) {
@@ -247,7 +242,6 @@ display:
           }
           break;
         }
-        
         // --- PAGE 5: Stopwatch ---
         case 5: {
           uint32_t display_time = id(stopwatch_elapsed_time);
@@ -256,15 +250,12 @@ display:
           }
           int minutes = (display_time / 1000) / 60;
           int seconds = (display_time / 1000) % 60;
-          int hundredths = (display_time % 1000) / 10;
           it.printf(64, 20, id(font_big), TextAlign::CENTER, "%02d:%02d", minutes, seconds);
-          // it.printf(110, 48, id(font_14), TextAlign::LEFT, ".%02d", hundredths);
           if (!id(lap_times).empty()) {
             it.printf(64, 58, id(font_14), TextAlign::CENTER, "Lap: %s", id(lap_times).back().c_str());
           }
           break;
         }
-
         // --- PAGE 6: Etch-a-Sketch ---
         case 6: {
           it.printf(64, 5, id(font_14), TextAlign::CENTER, "Etch-A-Sketch");
@@ -283,28 +274,69 @@ display:
           }
           break;
         }
-
         // --- PAGE 7: SNAKE GAME ---
         case 7: {
           if (!id(snake_is_active)) {
-            // --- IDLE/START SCREEN ---
             it.printf(64, 24, id(font_24), TextAlign::CENTER, "SNAKE");
             it.printf(64, 50, id(font_14), TextAlign::CENTER, "Press to Start");
           } else if (id(snake_game_over)) {
-            // --- GAME OVER SCREEN ---
             it.printf(64, 18, id(font_24), TextAlign::CENTER, "GAME OVER");
             it.printf(64, 48, id(font_14), TextAlign::CENTER, "Score: %d", id(snake_score));
           } else {
-            // --- ACTIVE GAMEPLAY SCREEN ---
-            it.printf(64, 5, id(font_14), TextAlign::CENTER, "Score: %d", id(snake_score));
-            it.line(0, 10, 127, 10); // Separator line
-
-            // Draw food
-            it.filled_rectangle(id(snake_food_x) * 4, id(snake_food_y) * 4 + 11, 4, 4);
-
-            // Draw snake
-            for (const auto& segment : id(snake_body)) {
-              it.filled_rectangle(segment.first * 4, segment.second * 4 + 11, 4, 4);
+            it.printf(64, 4, id(font_14), TextAlign::CENTER, "Score: %d", id(snake_score));
+            it.rectangle(0, 10, 128, 54);
+            it.filled_rectangle(id(snake_food_x) * 4 + 1, id(snake_food_y) * 4 + 11, 4, 4);
+            if (!id(snake_body).empty()) {
+              auto head = id(snake_body).front();
+              int head_px_x = head.first * 4 + 1;
+              int head_px_y = head.second * 4 + 11;
+              it.filled_rectangle(head_px_x, head_px_y, 4, 4);
+              switch (id(snake_last_direction)) {
+                case 0: it.horizontal_line(head_px_x + 1, head_px_y, 2, COLOR_OFF); break;
+                case 1: it.vertical_line(head_px_x + 3, head_px_y + 1, 2, COLOR_OFF); break;
+                case 2: it.horizontal_line(head_px_x + 1, head_px_y + 3, 2, COLOR_OFF); break;
+                case 3: it.vertical_line(head_px_x, head_px_y + 1, 2, COLOR_OFF); break;
+              }
+              for (size_t i = 1; i < id(snake_body).size() - 1; ++i) {
+                const auto& segment = id(snake_body)[i];
+                it.filled_rectangle(segment.first * 4 + 1, segment.second * 4 + 11, 4, 4);
+              }
+              if (id(snake_body).size() > 1) {
+                auto tail = id(snake_body).back();
+                it.filled_rectangle(tail.first * 4 + 1, tail.second * 4 + 11, 4, 4);
+              }
+            }
+          }
+          break;
+        }
+        // --- PAGE 8: SPACE SHOOTER ---
+        case 8: {
+          if (!id(ss_is_active)) {
+            it.printf(64, 24, id(font_24), TextAlign::CENTER, "Shooter");
+            it.printf(64, 50, id(font_14), TextAlign::CENTER, "Press to Start");
+          } else if (id(ss_game_over)) {
+            it.printf(64, 18, id(font_24), TextAlign::CENTER, "GAME OVER");
+            it.printf(64, 48, id(font_14), TextAlign::CENTER, "Score: %d", id(ss_score));
+          } else {
+            it.printf(64, 4, id(font_14), TextAlign::CENTER, "Score: %d", id(ss_score));
+            it.rectangle(0, 10, 128, 54);
+            int player_px_x = id(ss_player_x) * 4;
+            it.line(player_px_x, 62, player_px_x + 4, 62);
+            it.line(player_px_x, 62, player_px_x + 2, 59);
+            it.line(player_px_x + 4, 62, player_px_x + 2, 59);
+            for (const auto& bullet : id(ss_bullets)) {
+              it.vertical_line(bullet.first * 4 + 2, bullet.second * 4 + 11, 3);
+            }
+            for (const auto& target : id(ss_targets)) {
+              it.filled_circle(target.first * 4 + 2, target.second * 4 + 13, 2);
+            }
+            for (const auto& explosion : id(ss_explosions)) {
+              int ex_x = std::get<0>(explosion) * 4 + 2;
+              int ex_y = std::get<1>(explosion) * 4 + 13;
+              int frame = std::get<2>(explosion);
+              int size = 4 - frame;
+              it.line(ex_x - size, ex_y - size, ex_x + size, ex_y + size);
+              it.line(ex_x + size, ex_y - size, ex_x - size, ex_y + size);
             }
           }
           break;
@@ -329,8 +361,10 @@ sensor:
       then:
         - script.execute: reset_display_timer
         - lambda: |-
-            // --- SNAKE GAME --- Control snake direction
-            if (id(current_page) == 7 && id(snake_is_active) && !id(snake_game_over)) {
+            if (id(current_page) == 8 && id(ss_is_active) && !id(ss_game_over)) {
+              id(ss_player_x)++;
+              if (id(ss_player_x) > 30) id(ss_player_x) = 30;
+            } else if (id(current_page) == 7 && id(snake_is_active) && !id(snake_game_over)) {
               id(snake_direction) = (id(snake_direction) + 1) % 4;
             } else if (id(current_page) == 4 && id(pomodoro_setup_mode)) {
               id(pomodoro_selection_index)++;
@@ -351,18 +385,19 @@ sensor:
                   break;
               }
             } else {
-              // Normal page navigation (updated page count)
               id(current_page)++;
-              if (id(current_page) > 7) id(current_page) = 0;
+              if (id(current_page) > 8) id(current_page) = 0;
             }
             id(oled).update();
     on_anticlockwise:
       then:
         - script.execute: reset_display_timer
         - lambda: |-
-            // --- SNAKE GAME --- Control snake direction
-            if (id(current_page) == 7 && id(snake_is_active) && !id(snake_game_over)) {
-              id(snake_direction) = (id(snake_direction) + 3) % 4; // +3 is same as -1 for modulo 4
+            if (id(current_page) == 8 && id(ss_is_active) && !id(ss_game_over)) {
+              id(ss_player_x)--;
+              if (id(ss_player_x) < 0) id(ss_player_x) = 0;
+            } else if (id(current_page) == 7 && id(snake_is_active) && !id(snake_game_over)) {
+              id(snake_direction) = (id(snake_direction) + 3) % 4;
             } else if (id(current_page) == 4 && id(pomodoro_setup_mode)) {
               id(pomodoro_selection_index)--;
               if (id(pomodoro_selection_index) < 0) id(pomodoro_selection_index) = 3;
@@ -382,18 +417,15 @@ sensor:
                   break;
               }
             } else {
-              // Normal page navigation (updated page count)
               id(current_page)--;
-              if (id(current_page) < 0) id(current_page) = 7;
+              if (id(current_page) < 0) id(current_page) = 8;
             }
             id(oled).update();
 
 text_sensor:
-  # Virtual sensor for focus mode status
   - platform: template
     name: "Focus Mode Status"
     id: focus_mode_status
-    
   - platform: wifi_info
     ip_address:
       name: "ESP IP Address"
@@ -497,13 +529,11 @@ binary_sensor:
                   switch(id(current_page)) {
                     case 4: {
                       if (id(pomodoro_active)) {
-                        // ACTION: STOP the timer
                         id(pomodoro_active) = false;
                         id(pomodoro_setup_mode) = false;
                         id(ha_focus_mode_switch).turn_off();
                         id(focus_mode_status).publish_state("OFF");
                       } else if (id(pomodoro_setup_mode)) {
-                        // ACTION: START the timer
                         id(pomodoro_setup_mode) = false;
                         id(pomodoro_active) = true;
                         const int durations[] = {10, 20, 30, 60};
@@ -515,7 +545,6 @@ binary_sensor:
                         id(ha_focus_mode_switch).turn_on();
                         id(focus_mode_status).publish_state("ON");
                       } else {
-                        // ACTION: ENTER setup mode
                         id(pomodoro_setup_mode) = true;
                       }
                       break;
@@ -526,10 +555,19 @@ binary_sensor:
                       id(stopwatch_active) = !id(stopwatch_active);
                       break;
                     }
-                    // --- SNAKE GAME --- Start or reset the game
                     case 7: {
                       if (!id(snake_is_active) || id(snake_game_over)) {
                         id(snake_start_game).execute();
+                      }
+                      break;
+                    }
+                    case 8: {
+                      if (!id(ss_is_active) || id(ss_game_over)) {
+                        id(ss_start_game).execute();
+                      } else {
+                        if (id(ss_bullets).size() < 5) {
+                          id(ss_bullets).push_back({id(ss_player_x), 13});
+                        }
                       }
                       break;
                     }
@@ -630,10 +668,10 @@ globals:
     initial_value: 'false'
   - id: pomodoro_selection_index
     type: int
-    initial_value: '1' # Start with 20 minutes selected
+    initial_value: '1'
   - id: pomodoro_work_duration
     type: uint32_t
-    initial_value: '1200' # Default to 20 minutes in seconds
+    initial_value: '1200'
   - id: pomodoro_is_work_session
     type: bool
     initial_value: 'true'
@@ -665,8 +703,6 @@ globals:
     initial_value: 'true'
   - id: etch_pixels
     type: std::vector<bool>
-  
-  # --- SNAKE GAME --- Globals for game state
   - id: snake_is_active
     type: bool
     initial_value: 'false'
@@ -678,7 +714,7 @@ globals:
     initial_value: '0'
   - id: snake_direction
     type: int
-    initial_value: '1' # 0=U, 1=R, 2=D, 3=L
+    initial_value: '1'
   - id: snake_last_direction
     type: int
     initial_value: '1'
@@ -690,6 +726,24 @@ globals:
     initial_value: '0'
   - id: snake_body
     type: std::vector<std::pair<int, int>>
+  - id: ss_is_active
+    type: bool
+    initial_value: 'false'
+  - id: ss_game_over
+    type: bool
+    initial_value: 'false'
+  - id: ss_score
+    type: int
+    initial_value: '0'
+  - id: ss_player_x
+    type: int
+    initial_value: '15'
+  - id: ss_bullets
+    type: std::vector<std::pair<int, int>>
+  - id: ss_targets
+    type: std::vector<std::pair<int, int>>
+  - id: ss_explosions
+    type: std::vector<std::tuple<int, int, int>>
     
 script:
   - id: reset_display_timer
@@ -738,40 +792,28 @@ script:
             - script.execute:
                 id: show_temp_message
                 msg: "Navigation Mode"
-
-  # --- SNAKE GAME --- Script to reset and start a new game
   - id: snake_start_game
     then:
       - lambda: |-
-          // Reset game state
           id(snake_is_active) = true;
           id(snake_game_over) = false;
           id(snake_score) = 0;
-          id(snake_direction) = 1; // Start moving right
+          id(snake_direction) = 1;
           id(snake_last_direction) = 1;
-
-          // Clear snake body and create a new starting snake
           id(snake_body).clear();
-          id(snake_body).push_back({5, 7}); // Logical grid is 32x14
-          id(snake_body).push_back({4, 7});
-          id(snake_body).push_back({3, 7});
-
-          // Place the first food
+          id(snake_body).push_back({5, 6});
+          id(snake_body).push_back({4, 6});
+          id(snake_body).push_back({3, 6});
           id(snake_place_food).execute();
       - component.update: oled
-
-  # --- SNAKE GAME --- Helper script to place food randomly
   - id: snake_place_food
     then:
       - lambda: |-
           bool food_on_snake;
           do {
             food_on_snake = false;
-            // Logical grid is 32x14 (128/4 x 56/4)
-            id(snake_food_x) = random(0, 32); 
-            id(snake_food_y) = random(0, 14);
-            
-            // Make sure food doesn't spawn on the snake
+            id(snake_food_x) = random(0, 31); 
+            id(snake_food_y) = random(0, 13);
             for (const auto& segment : id(snake_body)) {
               if (segment.first == id(snake_food_x) && segment.second == id(snake_food_y)) {
                 food_on_snake = true;
@@ -779,6 +821,17 @@ script:
               }
             }
           } while (food_on_snake);
+  - id: ss_start_game
+    then:
+      - lambda: |-
+          id(ss_is_active) = true;
+          id(ss_game_over) = false;
+          id(ss_score) = 0;
+          id(ss_player_x) = 15;
+          id(ss_bullets).clear();
+          id(ss_targets).clear();
+          id(ss_explosions).clear();
+      - component.update: oled
 
 interval:
   - interval: 1s
@@ -787,16 +840,16 @@ interval:
           if (id(pomodoro_active)) {
             uint32_t elapsed = (millis() - id(pomodoro_start_time)) / 1000;
             if (elapsed >= id(pomodoro_duration)) {
-              if (id(pomodoro_is_work_session)) { // Work session just ended
+              if (id(pomodoro_is_work_session)) {
                 id(pomodoro_is_work_session) = false;
-                id(pomodoro_duration) = 5 * 60; // 5 minute break
+                id(pomodoro_duration) = 5 * 60;
                 id(status_light).turn_on().set_rgb(0,0,1).set_brightness(0.5);
-                id(ha_focus_mode_switch).turn_off(); // Turn off HA switch for break
-              } else { // Break session just ended
+                id(ha_focus_mode_switch).turn_off();
+              } else {
                 id(pomodoro_is_work_session) = true;
-                id(pomodoro_duration) = id(pomodoro_work_duration); // Restore original work duration
+                id(pomodoro_duration) = id(pomodoro_work_duration);
                 id(status_light).turn_on().set_rgb(0,1,0).set_brightness(0.5);
-                id(ha_focus_mode_switch).turn_on(); // Turn on HA switch for new work session
+                id(ha_focus_mode_switch).turn_on();
               }
               id(pomodoro_start_time) = millis();
             }
@@ -806,67 +859,87 @@ interval:
           } else {
             id(status_light).turn_off();
           }
-          
           if (id(display_on) && (id(current_page) == 0 || id(current_page) == 4 || id(current_page) == 5)) {
             id(oled).update();
           }
-
-  # --- SNAKE GAME --- New, faster interval for the main game loop
   - interval: 300ms
     then:
       - lambda: |-
           if (!id(snake_is_active) || id(snake_game_over)) {
-            return; // Don't run game logic if not playing
+            return;
           }
-
-          // Prevent snake from reversing on itself
-          // (U is 0, D is 2... diff is 2. R is 1, L is 3... diff is 2)
           if (abs(id(snake_direction) - id(snake_last_direction)) == 2) {
             id(snake_direction) = id(snake_last_direction);
           }
           id(snake_last_direction) = id(snake_direction);
-
-          // Get current head and calculate next position
           auto head = id(snake_body).front();
           int next_x = head.first;
           int next_y = head.second;
-
           switch (id(snake_direction)) {
-            case 0: next_y--; break; // Up
-            case 1: next_x++; break; // Right
-            case 2: next_y++; break; // Down
-            case 3: next_x--; break; // Left
+            case 0: next_y--; break;
+            case 1: next_x++; break;
+            case 2: next_y++; break;
+            case 3: next_x--; break;
           }
-
-          // --- Check for Collisions ---
-          // Wall collision
-          if (next_x < 0 || next_x >= 32 || next_y < 0 || next_y >= 14) {
+          if (next_x < 0 || next_x >= 31 || next_y < 0 || next_y >= 13) {
             id(snake_game_over) = true;
             id(oled).update();
             return;
           }
-
-          // Self collision
-          for (const auto& segment : id(snake_body)) {
-            if (segment.first == next_x && segment.second == next_y) {
-              id(snake_game_over) = true;
-              id(oled).update();
-              return;
-            }
+          for (auto it = id(snake_body).begin(); it != id(snake_body).end(); ++it) {
+              if (it->first == next_x && it->second == next_y) {
+                  id(snake_game_over) = true;
+                  id(oled).update();
+                  return;
+              }
           }
-
-          // --- Check for Food ---
           bool ate_food = (next_x == id(snake_food_x) && next_y == id(snake_food_y));
-
-          // Add new head
           id(snake_body).insert(id(snake_body).begin(), {next_x, next_y});
-
           if (ate_food) {
             id(snake_score)++;
             id(snake_place_food).execute();
           } else {
-            // Remove tail if no food was eaten
             id(snake_body).pop_back();
           }
-          
+          id(oled).update();
+  - interval: 100ms
+    then:
+      - lambda: |-
+          if (!id(ss_is_active) || id(ss_game_over)) {
+            return;
+          }
+          for (int i = id(ss_explosions).size() - 1; i >= 0; i--) {
+            std::get<2>(id(ss_explosions)[i])--;
+            if (std::get<2>(id(ss_explosions)[i]) <= 0) {
+              id(ss_explosions).erase(id(ss_explosions).begin() + i);
+            }
+          }
+          for (int i = id(ss_bullets).size() - 1; i >= 0; i--) {
+            id(ss_bullets)[i].second--;
+            bool hit = false;
+            for (int j = id(ss_targets).size() - 1; j >= 0; j--) {
+              if (id(ss_bullets)[i].first == id(ss_targets)[j].first && id(ss_bullets)[i].second <= id(ss_targets)[j].second) {
+                id(ss_score)++;
+                id(ss_explosions).push_back({id(ss_targets)[j].first, id(ss_targets)[j].second, 3});
+                id(ss_targets).erase(id(ss_targets).begin() + j);
+                hit = true;
+                break;
+              }
+            }
+            if (hit || id(ss_bullets)[i].second < 0) {
+              id(ss_bullets).erase(id(ss_bullets).begin() + i);
+            }
+          }
+          for (int i = id(ss_targets).size() - 1; i >= 0; i--) {
+            id(ss_targets)[i].second++;
+            if (id(ss_targets)[i].second >= 12 && abs(id(ss_targets)[i].first - id(ss_player_x)) <= 1) {
+              id(ss_game_over) = true;
+            }
+            if (id(ss_targets)[i].second > 13) {
+              id(ss_targets).erase(id(ss_targets).begin() + i);
+            }
+          }
+          if (random_float() < 0.10) {
+            id(ss_targets).push_back({(int)random(0, 31), 0});
+          }
           id(oled).update();
