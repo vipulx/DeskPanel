@@ -2,44 +2,55 @@
 # ESPHome Desk Panel V2 Configuration
 #
 # Features Added:
-# - OLED Screensaver (large, dim clock) instead of turning off.
-# - Interactive Relay Control Page to toggle all 4 relays.
-# - Focus (Pomodoro) Timer Page with LED strip progress bar.
-# - Stopwatch Page with Lap Timer functionality.
-# - Etch-a-Sketch interactive drawing page.
-# - Long-press action on the Power Button for a "Shutdown All" script.
-# - IR Remote Receiver is now active and logs codes, ready for actions.
-# - Context-aware actions for the rotary encoder and its button.
+# - (MODIFIED) Focus Timer now has a dedicated "Setup Mode" for selecting time.
+# - (NEW) Added a text_sensor to report the Focus Mode ON/OFF state to Home Assistant.
 # -----------------------------------------------------------------------------
-
-
 esphome:
   name: deskpanel
   friendly_name: deskpanel
   on_boot:
-    priority: -100 # Ensures this runs after everything else is set up
-    then:
-      - script.execute: reset_display_timer
+    # First action: Initialize the Etch-a-Sketch buffer early
+    - priority: 600
+      then:
+        - lambda: |-
+            // Allocate memory for the 128x50 pixel drawing area
+            id(etch_pixels).resize(128 * 50);
+            ESP_LOGI("main", "Etch-A-Sketch pixel buffer initialized.");
+    
+    # Set initial state for the focus status sensor
+    - priority: 590
+      then:
+        - lambda: |-
+            id(focus_mode_status).publish_state("OFF");
+
+    # Second action: Reset the display timer after setup is complete
+    - priority: -100
+      then:
+        - script.execute: reset_display_timer
+
 esp32:
   board: lolin_s2_mini
   framework:
     type: arduino
 
-
-# --- Core Components (Logging, API, OTA, WiFi) ---
+# --- Core Components ---
 logger:
+
 api:
   encryption:
     key: "u8QItyIkTUl7Cgnewhi8cTiVLk83ylWnHNJMtunfh7U="
+
 ota:
   - platform: esphome
     password: "17a8526c55463f83fbdde041f796cd60"
+
 wifi:
   ssid: !secret wifi_ssid
   password: !secret wifi_password
   ap:
-    ssid: "Deskpanel V2 Fallback Hotspot"
+    ssid: "Deskpanel Fallback Hotspot"
     password: "HRdpdqnZy3FN"
+
 captive_portal:
 
 # --- Hardware I/O ---
@@ -50,7 +61,6 @@ output:
 remote_receiver:
   pin: GPIO14
   dump: all
-  
 i2c:
   sda: 8
   scl: 9
@@ -84,8 +94,11 @@ font:
     id: font_24
     size: 24
   - file: "fonts/digital-7m.ttf"
-    id: font_big
+    id: font_extra_big 
     size: 72
+  - file: "fonts/digital-7m.ttf"
+    id: font_big
+    size: 60
   - file: "fonts/digital-7m.ttf"
     id: font_screensaver
     size: 52
@@ -115,16 +128,15 @@ display:
         it.rectangle(0, 0, 128, 64);
       }
 
-      // --- CUSTOM MESSAGE OVERLAY (FIXED) ---
+      // --- CUSTOM MESSAGE OVERLAY ---
       if (id(show_message)) {
-        // Helper function to wrap text. This is much more robust.
         auto wrap_text = [&](std::string text) {
           std::string line = "";
           std::string word = "";
           int y = 10;
           for (auto x : text) {
             if (x == ' ') {
-              if (line.length() + word.length() > 18) { // Max chars per line
+              if (line.length() + word.length() > 18) {
                 it.printf(64, y, id(font_14), TextAlign::CENTER, "%s", line.c_str());
                 line = word + " ";
                 word = "";
@@ -151,7 +163,7 @@ display:
           int hour = id(home_time).now().hour;
           int minute = id(home_time).now().minute;
           hour = (hour % 12 == 0) ? 12 : hour % 12;
-          it.printf(64, 19, id(font_big), TextAlign::CENTER, "%d:%02d", hour, minute);
+          it.printf(64, 28, id(font_extra_big), TextAlign::CENTER, "%d:%02d", hour, minute);
           it.strftime(64, 60, id(font_14), TextAlign::CENTER, "%A, %b %d", id(home_time).now());
           break;
         }
@@ -168,7 +180,6 @@ display:
         case 2: {
           it.rectangle(1, 1, 62, 30); it.rectangle(65, 1, 62, 30);
           it.rectangle(1, 33, 62, 30); it.rectangle(65, 33, 62, 30);
-
           it.printf(32, 16, id(font_14), TextAlign::CENTER, "Light: %s", id(light_state).state.c_str());
           it.printf(96, 16, id(font_14), TextAlign::CENTER, "Fan: %s", id(fan_state).state.c_str());
           it.printf(32, 48, id(font_14), TextAlign::CENTER, "Plug: %s", id(plug_state).state.c_str());
@@ -176,19 +187,15 @@ display:
           break;
         }
         
-        // --- PAGE 3: Interactive Relay Control (UI FIX) ---
+        // --- PAGE 3: Interactive Relay Control ---
         case 3: {
           auto draw_toggle = [&](int x, int y, const char* label, bool state, bool selected) {
             if (selected && id(page_is_active)) {
               it.rectangle(x, y, 62, 30);
             }
             it.printf(x + 31, y + 5, id(font_14), TextAlign::CENTER, "%s", label);
-            
-            // FIX: Replaced round_rectangle with standard rectangle.
             it.rectangle(x + 13, y + 17, 36, 10, COLOR_ON);
-
             if (state) { // ON
-              // FIX: Replaced filled_round_rectangle with filled_rectangle.
               it.filled_rectangle(x + 29, y + 18, 19, 8); // Right side fill
               it.filled_circle(x + 31 + 9, y + 22, 4, COLOR_OFF);
               it.circle(x + 31 + 9, y + 22, 4, COLOR_OFF);
@@ -198,27 +205,22 @@ display:
               it.circle(x + 13 + 9, y + 22, 4, COLOR_ON);
             }
           };
-
           const char* labels[] = {"Server", "Monitor", "Alexa", "FireTV"};
           bool states[] = {id(relay_server).state, id(relay_monitor).state, id(relay_alexa).state, id(relay_firetv).state};
-          
           draw_toggle(1, 1, labels[0], states[0], id(relay_selection_index) == 0);
           draw_toggle(65, 1, labels[1], states[1], id(relay_selection_index) == 1);
           draw_toggle(1, 33, labels[2], states[2], id(relay_selection_index) == 2);
           draw_toggle(65, 33, labels[3], states[3], id(relay_selection_index) == 3);
-          
           if (!id(page_is_active)) {
              it.printf(64, 58, id(font_14), TextAlign::CENTER, "Press to Enter");
           }
           break;
         }
 
-        // --- PAGE 4: Focus Timer ---
+        // --- PAGE 4: Focus Timer (UPGRADED) ---
         case 4: {
-          if (!id(pomodoro_active)) {
-            it.printf(64, 24, id(font_24), TextAlign::CENTER, "Focus Timer");
-            it.printf(64, 50, id(font_14), TextAlign::CENTER, "Press to Start");
-          } else {
+          if (id(pomodoro_active)) {
+            // --- ACTIVE TIMER MODE ---
             uint32_t elapsed = (millis() - id(pomodoro_start_time)) / 1000;
             uint32_t remaining = id(pomodoro_duration) > elapsed ? id(pomodoro_duration) - elapsed : 0;
             int minutes = remaining / 60;
@@ -226,10 +228,23 @@ display:
             const char* mode = id(pomodoro_is_work_session) ? "Work" : "Break";
             it.printf(64, 10, id(font_14), TextAlign::CENTER, "%s", mode);
             it.printf(64, 38, id(font_big), TextAlign::CENTER, "%02d:%02d", minutes, seconds);
-
             float progress = (float)elapsed / id(pomodoro_duration);
             it.rectangle(4, 58, 120, 6);
             it.filled_rectangle(4, 58, 120 * progress, 6);
+          } else if (id(pomodoro_setup_mode)) {
+            // --- SETUP MODE ---
+            const int durations[] = {10, 20, 30, 60};
+            int selected_duration = durations[id(pomodoro_selection_index)];
+            it.printf(64, 10, id(font_14), TextAlign::CENTER, "Select Duration");
+            it.printf(64, 38, id(font_big), TextAlign::CENTER, "%d", selected_duration);
+            it.printf(95, 42, id(font_14), TextAlign::CENTER, "min");
+            it.printf(64, 60, id(font_14), TextAlign::CENTER, "Press to Start");
+            it.printf(15, 38, id(font_24), TextAlign::CENTER, "<");
+            it.printf(113, 38, id(font_24), TextAlign::CENTER, ">");
+          } else {
+            // --- IDLE MODE ---
+            it.printf(64, 24, id(font_24), TextAlign::CENTER, "Focus Timer");
+            it.printf(64, 50, id(font_14), TextAlign::CENTER, "Press to Setup");
           }
           break;
         }
@@ -243,11 +258,10 @@ display:
           int minutes = (display_time / 1000) / 60;
           int seconds = (display_time / 1000) % 60;
           int hundredths = (display_time % 1000) / 10;
-          it.printf(64, 18, id(font_big), TextAlign::CENTER, "%02d:%02d", minutes, seconds);
-          it.printf(110, 40, id(font_14), TextAlign::LEFT, ".%02d", hundredths);
-
+          it.printf(64, 28, id(font_extra_big), TextAlign::CENTER, "%02d:%02d", minutes, seconds);
+          it.printf(110, 48, id(font_14), TextAlign::LEFT, ".%02d", hundredths);
           if (!id(lap_times).empty()) {
-            it.printf(64, 58, id(font_14), TextAlign::CENTER, "Lap: %s", id(lap_times).back().c_str());
+            it.printf(64, 60, id(font_14), TextAlign::CENTER, "Lap: %s", id(lap_times).back().c_str());
           }
           break;
         }
@@ -266,14 +280,13 @@ display:
             it.horizontal_line(id(etch_x)-2, id(etch_y)+10, 5, COLOR_ON);
             it.vertical_line(id(etch_x), id(etch_y)+8, 5, COLOR_ON);
           } else {
-             it.printf(64, 58, id(font_14), TextAlign::CENTER, "Press to Enter");
+            it.printf(64, 58, id(font_14), TextAlign::CENTER, "Press to Enter");
           }
           break;
         }
       }
 
-# --- (The rest of the file is unchanged) ---
-# ---------------------------------------------
+# -------------------
 # Sensors & Inputs
 # -------------------
 sensor:
@@ -281,7 +294,6 @@ sensor:
     name: "WiFi Signal"
     id: my_wifi_signal
     update_interval: 30s
-
   - platform: rotary_encoder
     name: "Rotary Encoder"
     pin_a: GPIO2
@@ -292,7 +304,11 @@ sensor:
       then:
         - script.execute: reset_display_timer
         - lambda: |-
-            if (id(page_is_active)) {
+            // Only change timer selection if in setup mode
+            if (id(current_page) == 4 && id(pomodoro_setup_mode)) {
+              id(pomodoro_selection_index)++;
+              if (id(pomodoro_selection_index) > 3) id(pomodoro_selection_index) = 0;
+            } else if (id(page_is_active)) {
               switch(id(current_page)) {
                 case 3:
                   id(relay_selection_index)++;
@@ -308,16 +324,20 @@ sensor:
                   break;
               }
             } else {
+              // Normal page navigation
               id(current_page)++;
               if (id(current_page) > 6) id(current_page) = 0;
             }
             id(oled).update();
-
     on_anticlockwise:
       then:
         - script.execute: reset_display_timer
         - lambda: |-
-            if (id(page_is_active)) {
+            // Only change timer selection if in setup mode
+            if (id(current_page) == 4 && id(pomodoro_setup_mode)) {
+              id(pomodoro_selection_index)--;
+              if (id(pomodoro_selection_index) < 0) id(pomodoro_selection_index) = 3;
+            } else if (id(page_is_active)) {
               switch(id(current_page)) {
                 case 3:
                   id(relay_selection_index)--;
@@ -333,12 +353,18 @@ sensor:
                   break;
               }
             } else {
+              // Normal page navigation
               id(current_page)--;
               if (id(current_page) < 0) id(current_page) = 6;
             }
             id(oled).update();
 
 text_sensor:
+  # Virtual sensor for focus mode status
+  - platform: template
+    name: "Focus Mode Status"
+    id: focus_mode_status
+    
   - platform: wifi_info
     ip_address:
       name: "ESP IP Address"
@@ -385,8 +411,6 @@ binary_sensor:
           - switch.turn_on: relay_server
           - delay: 1s
           - switch.turn_on: server_power_switch
-          - delay: 1s
-          - switch.turn_off: server_power_switch
       - timing:
           - ON for at most 1s
           - OFF for at most 0.3s
@@ -399,8 +423,6 @@ binary_sensor:
           - logger.log: "TV Mode"
           - switch.turn_on: relay_monitor
           - switch.turn_on: server_power_switch
-          - delay: 1s
-          - switch.turn_off: server_power_switch
           - delay: 3s
           - switch.turn_on: relay_alexa
           - switch.turn_on: relay_firetv
@@ -417,9 +439,9 @@ binary_sensor:
     name: "Encoder Button"
     id: encoder_button
     on_multi_click:
-      - timing:
-          - ON for at most 1s
-          - OFF for at least 0.05s
+      - timing: # Single Press
+        - ON for at most 1s
+        - OFF for at least 0.05s
         then:
           - script.execute: reset_display_timer
           - lambda: |-
@@ -445,9 +467,28 @@ binary_sensor:
                 } else {
                   switch(id(current_page)) {
                     case 4: {
-                      id(pomodoro_active) = !id(pomodoro_active);
-                      if(id(pomodoro_active)) id(pomodoro_start_time) = millis();
-                      else { id(pomodoro_is_work_session) = true; id(pomodoro_duration) = 25 * 60; }
+                      if (id(pomodoro_active)) {
+                        // ACTION: STOP the timer
+                        id(pomodoro_active) = false;
+                        id(pomodoro_setup_mode) = false;
+                        id(ha_focus_mode_switch).turn_off();
+                        id(focus_mode_status).publish_state("OFF");
+                      } else if (id(pomodoro_setup_mode)) {
+                        // ACTION: START the timer
+                        id(pomodoro_setup_mode) = false;
+                        id(pomodoro_active) = true;
+                        const int durations[] = {10, 20, 30, 60};
+                        uint32_t selected_seconds = durations[id(pomodoro_selection_index)] * 60;
+                        id(pomodoro_work_duration) = selected_seconds;
+                        id(pomodoro_duration) = selected_seconds;
+                        id(pomodoro_start_time) = millis();
+                        id(pomodoro_is_work_session) = true;
+                        id(ha_focus_mode_switch).turn_on();
+                        id(focus_mode_status).publish_state("ON");
+                      } else {
+                        // ACTION: ENTER setup mode
+                        id(pomodoro_setup_mode) = true;
+                      }
                       break;
                     }
                     case 5: {
@@ -460,14 +501,14 @@ binary_sensor:
                 }
               }
               id(oled).update();
-      - timing:
-          - ON for at most 1s
-          - OFF for at most 0.3s
-          - ON for at most 1s
-          - OFF for at least 0.05s
+      - timing: # Double Press
+        - ON for at most 1s
+        - OFF for at most 0.3s
+        - ON for at most 1s
+        - OFF for at least 0.05s
         then:
-           - script.execute: reset_display_timer
-           - lambda: |-
+          - script.execute: reset_display_timer
+          - lambda: |-
               if (id(page_is_active) && id(current_page) == 6) {
                 std::fill(id(etch_pixels).begin(), id(etch_pixels).end(), false);
               } else if (!id(page_is_active) && id(current_page) == 5) {
@@ -480,8 +521,8 @@ binary_sensor:
                 }
               }
               id(oled).update();
-      - timing:
-          - ON for at least 0.8s
+      - timing: # Long Press
+        - ON for at least 0.8s
         then:
           - script.execute: exit_page_mode
 
@@ -489,11 +530,19 @@ button:
   - platform: restart
     id: restart_device
     name: "Restart ESP"
+
 switch:
+  - platform: homeassistant
+    id: ha_focus_mode_switch
+    entity_id: input_boolean.focus_mode
   - platform: gpio
     pin: GPIO6
     id: server_power_switch
     name: "Server Power Switch"
+    on_turn_on:
+      then:
+        - delay: 1s
+        - switch.turn_off: server_power_switch
   - platform: gpio
     pin: GPIO10
     id: relay_server
@@ -540,6 +589,16 @@ globals:
   - id: pomodoro_active
     type: bool
     initial_value: 'false'
+  # State for timer setup mode
+  - id: pomodoro_setup_mode
+    type: bool
+    initial_value: 'false'
+  - id: pomodoro_selection_index
+    type: int
+    initial_value: '1' # Start with 20 minutes selected
+  - id: pomodoro_work_duration
+    type: uint32_t
+    initial_value: '1200' # Default to 20 minutes in seconds
   - id: pomodoro_is_work_session
     type: bool
     initial_value: 'true'
@@ -548,7 +607,7 @@ globals:
     initial_value: '0'
   - id: pomodoro_duration
     type: uint32_t
-    initial_value: '1500'
+    initial_value: '1500' # This will be overwritten on start
   - id: stopwatch_active
     type: bool
     initial_value: 'false'
@@ -599,7 +658,6 @@ script:
       - lambda: |-
           id(show_message) = false;
       - component.update: oled
-
   - id: shutdown_all
     then:
       - script.execute:
@@ -610,7 +668,6 @@ script:
       - switch.turn_off: relay_monitor
       - switch.turn_off: relay_alexa
       - switch.turn_off: relay_firetv
-
   - id: exit_page_mode
     then:
       - if:
@@ -629,14 +686,16 @@ interval:
           if (id(pomodoro_active)) {
             uint32_t elapsed = (millis() - id(pomodoro_start_time)) / 1000;
             if (elapsed >= id(pomodoro_duration)) {
-              if (id(pomodoro_is_work_session)) {
+              if (id(pomodoro_is_work_session)) { // Work session just ended
                 id(pomodoro_is_work_session) = false;
-                id(pomodoro_duration) = 5 * 60;
+                id(pomodoro_duration) = 5 * 60; // 5 minute break
                 id(status_light).turn_on().set_rgb(0,0,1).set_brightness(0.5);
-              } else {
+                id(ha_focus_mode_switch).turn_off(); // Turn off HA switch for break
+              } else { // Break session just ended
                 id(pomodoro_is_work_session) = true;
-                id(pomodoro_duration) = 25 * 60;
+                id(pomodoro_duration) = id(pomodoro_work_duration); // Restore original work duration
                 id(status_light).turn_on().set_rgb(0,1,0).set_brightness(0.5);
+                id(ha_focus_mode_switch).turn_on(); // Turn on HA switch for new work session
               }
               id(pomodoro_start_time) = millis();
             }
