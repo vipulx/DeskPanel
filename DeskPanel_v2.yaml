@@ -2,11 +2,9 @@
 # ESPHome Desk Panel V2 Configuration
 #
 # Features Added:
-# - (FIXED) Corrected YAML indentation error in on_multi_click.
-# - (NEW) Added a complete "Space Shooter" game on Page 8.
-# - (MODIFIED) Game interface updated to include a border, matching the classic Nokia style.
-# - (MODIFIED) Snake visuals enhanced with a distinct head and tail.
-# - A complete, playable Snake game on Page 7.
+# - (MODIFIED) Games now use button for Pause/Play and long-press to Exit.
+# - (MODIFIED) Space Shooter has automatic firing.
+# - (MODIFIED) Implemented multi-stage display timeout (Return Home, Screensaver, Display Off).
 # -----------------------------------------------------------------------------
 esphome:
   name: deskpanel
@@ -16,7 +14,6 @@ esphome:
     - priority: 600
       then:
         - lambda: |-
-            // Allocate memory for the 128x50 pixel drawing area
             id(etch_pixels).resize(128 * 50);
             ESP_LOGI("main", "Etch-A-Sketch pixel buffer initialized.");
     
@@ -28,7 +25,7 @@ esphome:
     # Second action: Reset the display timer after setup is complete
     - priority: -100
       then:
-        - script.execute: reset_display_timer
+        - script.execute: multi_stage_timeout
 
 esp32:
   board: lolin_s2_mini
@@ -114,6 +111,10 @@ display:
     id: oled
     address: 0x3C
     lambda: |-
+      if (id(display_fully_off)) {
+        it.fill(COLOR_OFF);
+        return;
+      }
       if (!id(display_on)) {
         // --- SCREENSAVER MODE ---
         it.fill(COLOR_OFF);
@@ -307,6 +308,9 @@ display:
               }
             }
           }
+          if (id(snake_is_paused)) {
+            it.printf(64, 32, id(font_24), TextAlign::CENTER, "PAUSED");
+          }
           break;
         }
         // --- PAGE 8: SPACE SHOOTER ---
@@ -339,6 +343,9 @@ display:
               it.line(ex_x + size, ex_y - size, ex_x - size, ex_y + size);
             }
           }
+          if (id(ss_is_paused)) {
+            it.printf(64, 32, id(font_24), TextAlign::CENTER, "PAUSED");
+          }
           break;
         }
       }
@@ -359,7 +366,7 @@ sensor:
     resolution: 2
     on_clockwise:
       then:
-        - script.execute: reset_display_timer
+        - script.execute: multi_stage_timeout
         - lambda: |-
             if (id(current_page) == 8 && id(ss_is_active) && !id(ss_game_over)) {
               id(ss_player_x)++;
@@ -391,7 +398,7 @@ sensor:
             id(oled).update();
     on_anticlockwise:
       then:
-        - script.execute: reset_display_timer
+        - script.execute: multi_stage_timeout
         - lambda: |-
             if (id(current_page) == 8 && id(ss_is_active) && !id(ss_game_over)) {
               id(ss_player_x)--;
@@ -504,7 +511,7 @@ binary_sensor:
         - ON for at most 1s
         - OFF for at least 0.05s
         then:
-          - script.execute: reset_display_timer
+          - script.execute: multi_stage_timeout
           - lambda: |-
               if (id(page_is_active)) {
                 switch(id(current_page)) {
@@ -555,19 +562,19 @@ binary_sensor:
                       id(stopwatch_active) = !id(stopwatch_active);
                       break;
                     }
-                    case 7: {
+                    case 7: { // Snake Game: Start or Pause/Play
                       if (!id(snake_is_active) || id(snake_game_over)) {
                         id(snake_start_game).execute();
+                      } else {
+                        id(snake_is_paused) = !id(snake_is_paused);
                       }
                       break;
                     }
-                    case 8: {
+                    case 8: { // Space Shooter: Start or Pause/Play
                       if (!id(ss_is_active) || id(ss_game_over)) {
                         id(ss_start_game).execute();
                       } else {
-                        if (id(ss_bullets).size() < 5) {
-                          id(ss_bullets).push_back({id(ss_player_x), 13});
-                        }
+                        id(ss_is_paused) = !id(ss_is_paused);
                       }
                       break;
                     }
@@ -581,7 +588,7 @@ binary_sensor:
         - ON for at most 1s
         - OFF for at least 0.05s
         then:
-          - script.execute: reset_display_timer
+          - script.execute: multi_stage_timeout
           - lambda: |-
               if (id(page_is_active) && id(current_page) == 6) {
                 std::fill(id(etch_pixels).begin(), id(etch_pixels).end(), false);
@@ -598,7 +605,14 @@ binary_sensor:
       - timing: # Long Press
         - ON for at least 0.8s
         then:
-          - script.execute: exit_page_mode
+          - script.execute: multi_stage_timeout
+          - if:
+              condition:
+                lambda: 'return id(current_page) == 7 || id(current_page) == 8;'
+              then:
+                - script.execute: exit_game_mode
+              else:
+                - script.execute: exit_page_mode
 
 button:
   - platform: restart
@@ -648,9 +662,9 @@ globals:
   - id: display_on
     type: bool
     initial_value: "true"
-  - id: display_timeout
-    type: int
-    initial_value: '30'
+  - id: display_fully_off
+    type: bool
+    initial_value: 'false'
   - id: message_text
     type: std::string
     initial_value: '"Hello Sid"'
@@ -709,6 +723,9 @@ globals:
   - id: snake_game_over
     type: bool
     initial_value: 'false'
+  - id: snake_is_paused
+    type: bool
+    initial_value: 'false'
   - id: snake_score
     type: int
     initial_value: '0'
@@ -732,6 +749,9 @@ globals:
   - id: ss_game_over
     type: bool
     initial_value: 'false'
+  - id: ss_is_paused
+    type: bool
+    initial_value: 'false'
   - id: ss_score
     type: int
     initial_value: '0'
@@ -746,24 +766,38 @@ globals:
     type: std::vector<std::tuple<int, int, int>>
     
 script:
-  - id: reset_display_timer
+  - id: multi_stage_timeout
     mode: restart
     then:
       - lambda: |-
+          if (id(display_fully_off)) {
+            id(display_fully_off) = false;
+            id(oled).update();
+          }
           if (!id(display_on)) {
             id(display_on) = true;
             id(oled).update();
           }
-      - delay: !lambda "return id(display_timeout) * 1000;"
+      - delay: 5s
+      - lambda: |-
+          if (!id(snake_is_active) && !id(ss_is_active) && !id(page_is_active)) {
+            id(current_page) = 0;
+            id(oled).update();
+          }
+      - delay: 5s
       - lambda: |-
           id(display_on) = false;
-      - component.update: oled
+          id(oled).update();
+      - delay: 10s
+      - lambda: |-
+          id(display_fully_off) = true;
+          id(oled).update();
   - id: show_temp_message
     parameters:
       msg: string
     mode: restart
     then:
-      - script.execute: reset_display_timer
+      - script.execute: multi_stage_timeout
       - lambda: |-
           id(message_text) = msg;
           id(show_message) = true;
@@ -792,11 +826,25 @@ script:
             - script.execute:
                 id: show_temp_message
                 msg: "Navigation Mode"
+  - id: exit_game_mode
+    then:
+      - lambda: |-
+          if (id(current_page) == 7) {
+            id(snake_is_active) = false;
+            id(snake_is_paused) = false;
+          } else if (id(current_page) == 8) {
+            id(ss_is_active) = false;
+            id(ss_is_paused) = false;
+          }
+      - script.execute:
+          id: show_temp_message
+          msg: "Exited Game"
   - id: snake_start_game
     then:
       - lambda: |-
           id(snake_is_active) = true;
           id(snake_game_over) = false;
+          id(snake_is_paused) = false;
           id(snake_score) = 0;
           id(snake_direction) = 1;
           id(snake_last_direction) = 1;
@@ -826,6 +874,7 @@ script:
       - lambda: |-
           id(ss_is_active) = true;
           id(ss_game_over) = false;
+          id(ss_is_paused) = false;
           id(ss_score) = 0;
           id(ss_player_x) = 15;
           id(ss_bullets).clear();
@@ -865,7 +914,7 @@ interval:
   - interval: 300ms
     then:
       - lambda: |-
-          if (!id(snake_is_active) || id(snake_game_over)) {
+          if (!id(snake_is_active) || id(snake_game_over) || id(snake_is_paused)) {
             return;
           }
           if (abs(id(snake_direction) - id(snake_last_direction)) == 2) {
@@ -905,8 +954,16 @@ interval:
   - interval: 100ms
     then:
       - lambda: |-
-          if (!id(ss_is_active) || id(ss_game_over)) {
+          if (!id(ss_is_active) || id(ss_game_over) || id(ss_is_paused)) {
             return;
+          }
+          static int fire_cooldown = 0;
+          fire_cooldown++;
+          if (fire_cooldown > 5) {
+            fire_cooldown = 0;
+            if (id(ss_bullets).size() < 5) {
+              id(ss_bullets).push_back({id(ss_player_x), 13});
+            }
           }
           for (int i = id(ss_explosions).size() - 1; i >= 0; i--) {
             std::get<2>(id(ss_explosions)[i])--;
