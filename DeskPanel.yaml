@@ -373,18 +373,22 @@ switch:
     pin: GPIO10
     id: relay_server
     name: "Relay - Server"
+    inverted: True
 
   - platform: gpio
     pin: GPIO11
     id: relay_monitor
     name: "Relay - Monitor"
+    inverted: True
 
   - platform: gpio
     pin: GPIO12
     id: relay_alexa
     name: "Relay - Alexa"
-
+    inverted: True
+    
   - platform: gpio
     pin: GPIO13
     id: relay_firetv
     name: "Relay - FireTV"
+    inverted: True
