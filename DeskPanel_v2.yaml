@@ -2,6 +2,7 @@
 # ESPHome Desk Panel V2 Configuration
 #
 # Features Added:
+# - A complete, playable Snake game on Page 7.
 # - (MODIFIED) Focus Timer now has a dedicated "Setup Mode" for selecting time.
 # - (NEW) Added a text_sensor to report the Focus Mode ON/OFF state to Home Assistant.
 # -----------------------------------------------------------------------------
@@ -20,8 +21,7 @@ esphome:
     # Set initial state for the focus status sensor
     - priority: 590
       then:
-        - lambda: |-
-            id(focus_mode_status).publish_state("OFF");
+        - lambda: id(focus_mode_status).publish_state("OFF");
 
     # Second action: Reset the display timer after setup is complete
     - priority: -100
@@ -93,7 +93,6 @@ font:
   - file: "fonts/digital-7m.ttf"
     id: font_24
     size: 24
-
   - file: "fonts/digital-7m.ttf"
     id: font_extra_big 
     size: 62
@@ -284,6 +283,32 @@ display:
           }
           break;
         }
+
+        // --- PAGE 7: SNAKE GAME ---
+        case 7: {
+          if (!id(snake_is_active)) {
+            // --- IDLE/START SCREEN ---
+            it.printf(64, 24, id(font_24), TextAlign::CENTER, "SNAKE");
+            it.printf(64, 50, id(font_14), TextAlign::CENTER, "Press to Start");
+          } else if (id(snake_game_over)) {
+            // --- GAME OVER SCREEN ---
+            it.printf(64, 18, id(font_24), TextAlign::CENTER, "GAME OVER");
+            it.printf(64, 48, id(font_14), TextAlign::CENTER, "Score: %d", id(snake_score));
+          } else {
+            // --- ACTIVE GAMEPLAY SCREEN ---
+            it.printf(64, 5, id(font_14), TextAlign::CENTER, "Score: %d", id(snake_score));
+            it.line(0, 10, 127, 10); // Separator line
+
+            // Draw food
+            it.filled_rectangle(id(snake_food_x) * 4, id(snake_food_y) * 4 + 11, 4, 4);
+
+            // Draw snake
+            for (const auto& segment : id(snake_body)) {
+              it.filled_rectangle(segment.first * 4, segment.second * 4 + 11, 4, 4);
+            }
+          }
+          break;
+        }
       }
 
 # -------------------
@@ -304,8 +329,10 @@ sensor:
       then:
         - script.execute: reset_display_timer
         - lambda: |-
-            // Only change timer selection if in setup mode
-            if (id(current_page) == 4 && id(pomodoro_setup_mode)) {
+            // --- SNAKE GAME --- Control snake direction
+            if (id(current_page) == 7 && id(snake_is_active) && !id(snake_game_over)) {
+              id(snake_direction) = (id(snake_direction) + 1) % 4;
+            } else if (id(current_page) == 4 && id(pomodoro_setup_mode)) {
               id(pomodoro_selection_index)++;
               if (id(pomodoro_selection_index) > 3) id(pomodoro_selection_index) = 0;
             } else if (id(page_is_active)) {
@@ -324,17 +351,19 @@ sensor:
                   break;
               }
             } else {
-              // Normal page navigation
+              // Normal page navigation (updated page count)
               id(current_page)++;
-              if (id(current_page) > 6) id(current_page) = 0;
+              if (id(current_page) > 7) id(current_page) = 0;
             }
             id(oled).update();
     on_anticlockwise:
       then:
         - script.execute: reset_display_timer
         - lambda: |-
-            // Only change timer selection if in setup mode
-            if (id(current_page) == 4 && id(pomodoro_setup_mode)) {
+            // --- SNAKE GAME --- Control snake direction
+            if (id(current_page) == 7 && id(snake_is_active) && !id(snake_game_over)) {
+              id(snake_direction) = (id(snake_direction) + 3) % 4; // +3 is same as -1 for modulo 4
+            } else if (id(current_page) == 4 && id(pomodoro_setup_mode)) {
               id(pomodoro_selection_index)--;
               if (id(pomodoro_selection_index) < 0) id(pomodoro_selection_index) = 3;
             } else if (id(page_is_active)) {
@@ -353,9 +382,9 @@ sensor:
                   break;
               }
             } else {
-              // Normal page navigation
+              // Normal page navigation (updated page count)
               id(current_page)--;
-              if (id(current_page) < 0) id(current_page) = 6;
+              if (id(current_page) < 0) id(current_page) = 7;
             }
             id(oled).update();
 
@@ -497,6 +526,13 @@ binary_sensor:
                       id(stopwatch_active) = !id(stopwatch_active);
                       break;
                     }
+                    // --- SNAKE GAME --- Start or reset the game
+                    case 7: {
+                      if (!id(snake_is_active) || id(snake_game_over)) {
+                        id(snake_start_game).execute();
+                      }
+                      break;
+                    }
                   }
                 }
               }
@@ -589,7 +625,6 @@ globals:
   - id: pomodoro_active
     type: bool
     initial_value: 'false'
-  # State for timer setup mode
   - id: pomodoro_setup_mode
     type: bool
     initial_value: 'false'
@@ -607,7 +642,7 @@ globals:
     initial_value: '0'
   - id: pomodoro_duration
     type: uint32_t
-    initial_value: '1500' # This will be overwritten on start
+    initial_value: '1500'
   - id: stopwatch_active
     type: bool
     initial_value: 'false'
@@ -630,6 +665,31 @@ globals:
     initial_value: 'true'
   - id: etch_pixels
     type: std::vector<bool>
+  
+  # --- SNAKE GAME --- Globals for game state
+  - id: snake_is_active
+    type: bool
+    initial_value: 'false'
+  - id: snake_game_over
+    type: bool
+    initial_value: 'false'
+  - id: snake_score
+    type: int
+    initial_value: '0'
+  - id: snake_direction
+    type: int
+    initial_value: '1' # 0=U, 1=R, 2=D, 3=L
+  - id: snake_last_direction
+    type: int
+    initial_value: '1'
+  - id: snake_food_x
+    type: int
+    initial_value: '0'
+  - id: snake_food_y
+    type: int
+    initial_value: '0'
+  - id: snake_body
+    type: std::vector<std::pair<int, int>>
     
 script:
   - id: reset_display_timer
@@ -679,6 +739,47 @@ script:
                 id: show_temp_message
                 msg: "Navigation Mode"
 
+  # --- SNAKE GAME --- Script to reset and start a new game
+  - id: snake_start_game
+    then:
+      - lambda: |-
+          // Reset game state
+          id(snake_is_active) = true;
+          id(snake_game_over) = false;
+          id(snake_score) = 0;
+          id(snake_direction) = 1; // Start moving right
+          id(snake_last_direction) = 1;
+
+          // Clear snake body and create a new starting snake
+          id(snake_body).clear();
+          id(snake_body).push_back({5, 7}); // Logical grid is 32x14
+          id(snake_body).push_back({4, 7});
+          id(snake_body).push_back({3, 7});
+
+          // Place the first food
+          id(snake_place_food).execute();
+      - component.update: oled
+
+  # --- SNAKE GAME --- Helper script to place food randomly
+  - id: snake_place_food
+    then:
+      - lambda: |-
+          bool food_on_snake;
+          do {
+            food_on_snake = false;
+            // Logical grid is 32x14 (128/4 x 56/4)
+            id(snake_food_x) = random(0, 32); 
+            id(snake_food_y) = random(0, 14);
+            
+            // Make sure food doesn't spawn on the snake
+            for (const auto& segment : id(snake_body)) {
+              if (segment.first == id(snake_food_x) && segment.second == id(snake_food_y)) {
+                food_on_snake = true;
+                break;
+              }
+            }
+          } while (food_on_snake);
+
 interval:
   - interval: 1s
     then:
@@ -706,6 +807,66 @@ interval:
             id(status_light).turn_off();
           }
           
-          if (id(display_on) && (id(current_page) == 4 || id(current_page) == 5)) {
+          if (id(display_on) && (id(current_page) == 0 || id(current_page) == 4 || id(current_page) == 5)) {
             id(oled).update();
           }
+
+  # --- SNAKE GAME --- New, faster interval for the main game loop
+  - interval: 300ms
+    then:
+      - lambda: |-
+          if (!id(snake_is_active) || id(snake_game_over)) {
+            return; // Don't run game logic if not playing
+          }
+
+          // Prevent snake from reversing on itself
+          // (U is 0, D is 2... diff is 2. R is 1, L is 3... diff is 2)
+          if (abs(id(snake_direction) - id(snake_last_direction)) == 2) {
+            id(snake_direction) = id(snake_last_direction);
+          }
+          id(snake_last_direction) = id(snake_direction);
+
+          // Get current head and calculate next position
+          auto head = id(snake_body).front();
+          int next_x = head.first;
+          int next_y = head.second;
+
+          switch (id(snake_direction)) {
+            case 0: next_y--; break; // Up
+            case 1: next_x++; break; // Right
+            case 2: next_y++; break; // Down
+            case 3: next_x--; break; // Left
+          }
+
+          // --- Check for Collisions ---
+          // Wall collision
+          if (next_x < 0 || next_x >= 32 || next_y < 0 || next_y >= 14) {
+            id(snake_game_over) = true;
+            id(oled).update();
+            return;
+          }
+
+          // Self collision
+          for (const auto& segment : id(snake_body)) {
+            if (segment.first == next_x && segment.second == next_y) {
+              id(snake_game_over) = true;
+              id(oled).update();
+              return;
+            }
+          }
+
+          // --- Check for Food ---
+          bool ate_food = (next_x == id(snake_food_x) && next_y == id(snake_food_y));
+
+          // Add new head
+          id(snake_body).insert(id(snake_body).begin(), {next_x, next_y});
+
+          if (ate_food) {
+            id(snake_score)++;
+            id(snake_place_food).execute();
+          } else {
+            // Remove tail if no food was eaten
+            id(snake_body).pop_back();
+          }
+          
+          id(oled).update();
